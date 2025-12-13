@@ -1,0 +1,42 @@
+:root{
+  --bg:#f6f7fb; --card:#fff; --accent:#2563eb; --muted:#64748b;
+  --radius:10px;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter, system-ui, Arial, sans-serif;background:var(--bg);color:#111}
+.app{display:flex;min-height:100vh}
+.sidebar{width:220px;padding:20px;background:linear-gradient(180deg,#ffffff,#fbfdff);border-right:1px solid #eef2ff}
+.sidebar h2{margin:0 0 14px 0;font-size:18px}
+.sidebar nav{display:flex;flex-direction:column;gap:6px;margin-bottom:18px}
+.nav-link{padding:8px 10px;border-radius:8px;color:#0f172a;text-decoration:none;font-weight:600}
+.nav-link.active{background:#eef2ff;color:var(--accent)}
+.side-footer{margin-top:auto;font-size:14px;color:var(--muted)}
+.btn-ghost{display:inline-block;margin-top:8px;padding:6px 10px;border-radius:8px;border:1px solid #e2e8f0;color:#334155;text-decoration:none}
+
+.main{flex:1;display:flex;flex-direction:column}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-bottom:1px solid #eef2ff;background:linear-gradient(180deg,#fff,#fbfdff)}
+.topbar h1{margin:0;font-size:18px}
+.top-actions{display:flex;gap:8px;align-items:center}
+.top-actions input{padding:8px 10px;border:1px solid #e6eefc;border-radius:8px}
+.top-actions button{padding:8px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+
+.panel{padding:18px 28px;border-bottom:1px solid #f1f5f9;background:var(--card)}
+.panel h2{margin-top:0}
+.table-wrapper{overflow:auto;border-radius:8px;margin-top:12px;background:#fff;padding:6px;border:1px solid #eef2ff}
+.table-wrapper.small{padding:0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+thead th{background:#fbfdff;padding:10px;text-align:left;border-bottom:1px solid #eef2ff}
+tbody td{padding:10px;border-bottom:1px solid #f1f5f9}
+.form-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.form-inline input{padding:8px;border-radius:8px;border:1px solid #e6eefc;min-width:120px}
+.form-inline button{padding:8px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+
+.footer{padding:14px 28px;color:var(--muted);font-size:13px}
+
+/* small screens */
+@media(max-width:900px){
+  .app{flex-direction:column}
+  .sidebar{width:100%;display:flex;flex-direction:row;gap:12px;overflow:auto;padding:12px}
+  .main{order:2}
+  .topbar{padding:12px}
+}
