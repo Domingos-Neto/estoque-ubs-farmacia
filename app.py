@@ -1,7 +1,8 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file
-import sqlite3
-from pathlib import Path
+from flask import g # 'g' é para armazenar a conexão temporariamente
+from psycopg2.extras import RealDictCursor # Permite acessar colunas por nome (como sqlite3.Row)
+import psycopg2
 import hashlib
 from datetime import date, timedelta
 import io
@@ -12,27 +13,44 @@ import os
 import openpyxl 
 from openpyxl.styles import Font, PatternFill, Alignment
 
-DB_PATH = Path(__file__).parent / "estoque.db"
-
 app = Flask(__name__)
 app.secret_key = "chave_secreta_super_segura_troque_em_producao"
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Conecta ao banco de dados PostgreSQL e armazena em g."""
+    if 'db' not in g:
+        # Pega a URL de conexao da variavel de ambiente do Render
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            # Em ambiente local, você pode definir uma URL de fallback
+            raise Exception("DATABASE_URL não configurada. Configure no Render ou localmente.")
+        
+        g.db = psycopg2.connect(DATABASE_URL)
+    return g.db
 
 def query_db(query, args=(), one=False, commit=False):
+    """Executa uma query no PostgreSQL."""
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(query, args)
-    if commit:
-        conn.commit()
-        conn.close()
-        return None
-    rows = cur.fetchall()
-    conn.close()
-    return (rows[0] if rows else None) if one else rows
+    # Usar RealDictCursor para retornar resultados como dicionários (como sqlite3.Row)
+    cur = conn.cursor(cursor_factory=RealDictCursor) 
+    
+    try:
+        cur.execute(query, args)
+        
+        if commit:
+            conn.commit()
+            return None
+        
+        rows = cur.fetchall()
+        return (rows[0] if rows else None) if one else rows
+        
+    except psycopg2.Error as e:
+        conn.rollback()
+        print(f"Erro no DB: {e}")
+        # Lidar com erro apropriadamente
+        raise
+    finally:
+        cur.close()
 
 def generate_password_hash(password: str) -> str:
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -47,6 +65,13 @@ def login_required(f):
         if not session.get("user_id"): return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
+
+@app.teardown_appcontext
+def close_db(e=None):
+    """Fecha a conexão com o DB ao final do request."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -257,4 +282,5 @@ def api_del_user(uid):
 if __name__ == "__main__":
     # Usa a porta definida pelo ambiente (Render/Heroku) ou 5000 localmente
     port = int(os.environ.get("PORT", 5002))
+
     app.run(debug=True, host="0.0.0.0", port=port)
