@@ -1,0 +1,4 @@
+Flask
+Werkzeug
+openpyxl       # Para a funcionalidade de exportação Excel
+gunicorn       # Servidor HTTP para rodar o Flask em produção
