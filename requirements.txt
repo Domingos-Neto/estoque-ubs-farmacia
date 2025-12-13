@@ -1,4 +1,6 @@
 Flask
 Werkzeug
-openpyxl       # Para a funcionalidade de exportação Excel
-gunicorn       # Servidor HTTP para rodar o Flask em produção
+openpyxl
+gunicorn
+psycopg2-binary  # Novo: Driver para PostgreSQL
+python-dotenv    # Opcional, mas útil para carregar variáveis localmente
