@@ -1,6 +1,6 @@
 # app.py
 import eventlet # Necessário para o SocketIO rodar de forma assíncrona
-eventlet.monkey_patch()
+eventlet.monkey_patch() # CORREÇÃO: Deve ser chamado antes de todos os outros imports.
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file
 from flask import g # 'g' é para armazenar a conexão temporariamente
@@ -11,6 +11,7 @@ import hashlib
 from datetime import date, timedelta
 import io
 import os
+# import eventlet # Linha anterior removida/movida
 
 # --- NOVO IMPORT PARA EXCEL ---
 import openpyxl 
@@ -19,18 +20,13 @@ from openpyxl.styles import Font, PatternFill, Alignment
 app = Flask(__name__)
 app.secret_key = "chave_secreta_super_segura_troque_em_producao"
 
-# ----------------------------------------------------------------------
-# INICIALIZAÇÃO DO SOCKETIO CORRIGIDA
-# ----------------------------------------------------------------------
 # Configurar o SocketIO
+# Adicionado async_mode e transports para robustez no Render
 socketio = SocketIO(
     app,
-    async_mode='eventlet', # Confirma que o worker assíncrono é o eventlet
-    # Prioriza o 'polling' (mais estável no Gunicorn/Render) antes de tentar 'websocket'
-    transports=['polling', 'websocket'] 
+    async_mode='eventlet', 
+    transports=['polling', 'websocket']
 )
-# ----------------------------------------------------------------------
-
 
 def get_db():
     """Conecta ao banco de dados PostgreSQL e armazena em g."""
@@ -119,7 +115,8 @@ def dashboard():
 def export_excel():
     conn = get_db()
     
-    # Busca dados das 4 tabelas 
+    # Busca dados das 4 tabelas (USANDO O CURSOR PADRÃO PARA EVITAR CONFLITOS DE THREADING, MAS ISSO PODE SER OTIMIZADO)
+    # Exemplo: Usando query_db corrigido para garantir o uso de public.
     estoque = query_db("SELECT cod, descricao, unid, entradas, saidas, estoque_minimo, (entradas - saidas) as saldo FROM public.estoque ORDER BY cod")
     entradas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.entradas ORDER BY data DESC")
     saidas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.saidas ORDER BY data DESC")
@@ -340,5 +337,3 @@ if __name__ == "__main__":
     # O Gunicorn (no Render) deve ser configurado separadamente para usar --worker-class eventlet
     print(f"Iniciando SocketIO na porta {port}...")
     socketio.run(app, debug=True, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
-
-
