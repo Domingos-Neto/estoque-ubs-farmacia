@@ -10,6 +10,8 @@ import io
 import os
 import eventlet # Necessário para o SocketIO rodar de forma assíncrona
 
+eventlet.monkey_patch()
+
 # --- NOVO IMPORT PARA EXCEL ---
 import openpyxl 
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -338,3 +340,4 @@ if __name__ == "__main__":
     # O Gunicorn (no Render) deve ser configurado separadamente para usar --worker-class eventlet
     print(f"Iniciando SocketIO na porta {port}...")
     socketio.run(app, debug=True, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
+
