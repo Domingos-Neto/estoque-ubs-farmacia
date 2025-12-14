@@ -78,7 +78,7 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        user = query_db("SELECT * FROM public.users WHERE username = ?", (username,), one=True)
+        user = query_db("SELECT * FROM public.users WHERE username = %s", (username,), one=True)
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
             session["username"] = user["username"]
@@ -181,8 +181,8 @@ def api_stats():
     total_itens = query_db("SELECT COUNT(*) as c FROM public.itens", one=True)['c']
     baixa = query_db("SELECT COUNT(*) as c FROM public.estoque WHERE (entradas - saidas) <= estoque_minimo", one=True)['c']
     hoje = date.today().isoformat()
-    mov_ent = query_db("SELECT COUNT(*) as c FROM public.entradas WHERE data = ?", (hoje,), one=True)['c']
-    mov_sai = query_db("SELECT COUNT(*) as c FROM public.saidas WHERE data = ?", (hoje,), one=True)['c']
+    mov_ent = query_db("SELECT COUNT(*) as c FROM public.entradas WHERE data = %s", (hoje,), one=True)['c']
+    mov_sai = query_db("SELECT COUNT(*) as c FROM public.saidas WHERE data = %s", (hoje,), one=True)['c']
     
     chart_labels = []
     chart_ent = []
@@ -190,8 +190,8 @@ def api_stats():
     for i in range(6, -1, -1):
         d = (date.today() - timedelta(days=i)).isoformat()
         chart_labels.append(d.split('-')[2] + '/' + d.split('-')[1])
-        qe = query_db("SELECT SUM(quantidade) as q FROM public.entradas WHERE data = ?", (d,), one=True)['q'] or 0
-        qs = query_db("SELECT SUM(quantidade) as q FROM public.saidas WHERE data = ?", (d,), one=True)['q'] or 0
+        qe = query_db("SELECT SUM(quantidade) as q FROM public.entradas WHERE data = %s", (d,), one=True)['q'] or 0
+        qs = query_db("SELECT SUM(quantidade) as q FROM public.saidas WHERE data = %s", (d,), one=True)['q'] or 0
         chart_ent.append(qe)
         chart_sai.append(qs)
 
@@ -219,10 +219,10 @@ def api_itens_handler():
         return jsonify([dict(r) for r in query_db("SELECT * FROM public.itens ORDER BY cod")])
     data = request.json
     cod = data.get("cod", "").strip().upper()
-    if query_db("SELECT 1 FROM public.itens WHERE cod=?", (cod,), one=True): return jsonify({"error": "Código já existe"}), 400
-    query_db("INSERT INTO itens (cod, descricao, unid, estoque_minimo) VALUES (?,?,?,?)", 
+    if query_db("SELECT 1 FROM public.itens WHERE cod=%s", (cod,), one=True): return jsonify({"error": "Código já existe"}), 400
+    query_db("INSERT INTO itens (cod, descricao, unid, estoque_minimo) VALUES (%s,%s,%s,%s)", 
              (cod, data['descricao'], data['unid'], int(data.get("estoque_minimo", 10))), commit=True)
-    query_db("INSERT INTO estoque (cod, descricao, unid, estoque_minimo) VALUES (?,?,?,?)", 
+    query_db("INSERT INTO estoque (cod, descricao, unid, estoque_minimo) VALUES (%s,%s,%s,%s)", 
              (cod, data['descricao'], data['unid'], int(data.get("estoque_minimo", 10))), commit=True)
     return jsonify({"ok": True})
 
@@ -230,24 +230,24 @@ def api_itens_handler():
 @login_required
 def api_entrada():
     d = request.json
-    item = query_db("SELECT * FROM public.estoque WHERE cod=?", (d['cod'],), one=True)
+    item = query_db("SELECT * FROM public.estoque WHERE cod=%s", (d['cod'],), one=True)
     if not item: return jsonify({"error": "Item não encontrado"}), 404
-    query_db("INSERT INTO entradas (cod, descricao, unid, quantidade, data) VALUES (?,?,?,?,?)", 
+    query_db("INSERT INTO entradas (cod, descricao, unid, quantidade, data) VALUES (%s,%s,%s,%s,%s)", 
              (d['cod'], item['descricao'], item['unid'], int(d['qtd']), d['data']), commit=True)
-    query_db("UPDATE estoque SET entradas = entradas + ? WHERE cod=?", (int(d['qtd']), d['cod']), commit=True)
+    query_db("UPDATE estoque SET entradas = entradas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
     return jsonify({"ok": True})
 
 @app.route("/api/saida", methods=["POST"])
 @login_required
 def api_saida():
     d = request.json
-    item = query_db("SELECT * FROM public.estoque WHERE cod=?", (d['cod'],), one=True)
+    item = query_db("SELECT * FROM public.estoque WHERE cod=%s", (d['cod'],), one=True)
     if not item: return jsonify({"error": "Item não encontrado"}), 404
     saldo = item['entradas'] - item['saidas']
     if int(d['qtd']) > saldo: return jsonify({"error": f"Saldo insuficiente ({saldo})"}), 400
-    query_db("INSERT INTO saidas (cod, descricao, unid, quantidade, data) VALUES (?,?,?,?,?)", 
+    query_db("INSERT INTO saidas (cod, descricao, unid, quantidade, data) VALUES (%s,?,%s,%s,%s)", 
              (d['cod'], item['descricao'], item['unid'], int(d['qtd']), d['data']), commit=True)
-    query_db("UPDATE estoque SET saidas = saidas + ? WHERE cod=?", (int(d['qtd']), d['cod']), commit=True)
+    query_db("UPDATE estoque SET saidas = saidas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
     return jsonify({"ok": True})
 
 @app.route("/api/movimentacoes")
@@ -266,7 +266,7 @@ def api_users():
         return jsonify([dict(r) for r in query_db("SELECT id, username, is_admin FROM public.users")])
     d = request.json
     try:
-        query_db("INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)", 
+        query_db("INSERT INTO users (username, password_hash, is_admin) VALUES (%s,%s,%s)", 
                  (d['username'], generate_password_hash(d['password']), 1 if d['is_admin'] else 0), commit=True)
         return jsonify({"ok": True})
     except: return jsonify({"error": "Erro/Duplicado"}), 400
@@ -276,7 +276,7 @@ def api_users():
 def api_del_user(uid):
     if not session.get("is_admin"): return jsonify({"error": "Acesso negado"}), 403
     if uid == session["user_id"]: return jsonify({"error": "Não delete a si mesmo"}), 400
-    query_db("DELETE FROM users WHERE id=?", (uid,), commit=True)
+    query_db("DELETE FROM users WHERE id=%s", (uid,), commit=True)
     return jsonify({"ok": True})
 
 if __name__ == "__main__":
@@ -284,3 +284,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5002))
 
     app.run(debug=True, host="0.0.0.0", port=port)
+
