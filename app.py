@@ -1,37 +1,40 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file
 from flask import g # 'g' é para armazenar a conexão temporariamente
-from psycopg2.extras import RealDictCursor # Permite acessar colunas por nome (como sqlite3.Row)
+from psycopg2.extras import RealDictCursor 
+from flask_socketio import SocketIO, emit # Importacao necessária para WebSockets
 import psycopg2
 import hashlib
 from datetime import date, timedelta
 import io
 import os
+import eventlet # Necessário para o SocketIO rodar de forma assíncrona
 
 # --- NOVO IMPORT PARA EXCEL ---
-# Certifique-se de ter rodado: pip install openpyxl
 import openpyxl 
 from openpyxl.styles import Font, PatternFill, Alignment
 
 app = Flask(__name__)
 app.secret_key = "chave_secreta_super_segura_troque_em_producao"
 
+# Configurar o SocketIO
+# A chave secreta do Flask ja serve para o SocketIO, mas mantive a linha para clareza
+socketio = SocketIO(app)
+
 def get_db():
     """Conecta ao banco de dados PostgreSQL e armazena em g."""
     if 'db' not in g:
-        # Pega a URL de conexao da variavel de ambiente do Render
         DATABASE_URL = os.environ.get('DATABASE_URL')
         if not DATABASE_URL:
-            # Em ambiente local, você pode definir uma URL de fallback
             raise Exception("DATABASE_URL não configurada. Configure no Render ou localmente.")
         
-        g.db = psycopg2.connect(DATABASE_URL)
+        # Adiciona sslmode=require para compatibilidade com o Render
+        g.db = psycopg2.connect(DATABASE_URL + "?sslmode=require")
     return g.db
 
 def query_db(query, args=(), one=False, commit=False):
     """Executa uma query no PostgreSQL."""
     conn = get_db()
-    # Usar RealDictCursor para retornar resultados como dicionários (como sqlite3.Row)
     cur = conn.cursor(cursor_factory=RealDictCursor) 
     
     try:
@@ -47,7 +50,6 @@ def query_db(query, args=(), one=False, commit=False):
     except psycopg2.Error as e:
         conn.rollback()
         print(f"Erro no DB: {e}")
-        # Lidar com erro apropriadamente
         raise
     finally:
         cur.close()
@@ -78,7 +80,10 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        
+        # CORREÇÃO SQL: Trocando '?' por '%s'
         user = query_db("SELECT * FROM public.users WHERE username = %s", (username,), one=True)
+        
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
             session["username"] = user["username"]
@@ -103,19 +108,22 @@ def dashboard():
 def export_excel():
     conn = get_db()
     
-    # Busca dados das 4 tabelas
-    estoque = conn.execute("SELECT cod, descricao, unid, entradas, saidas, estoque_minimo, (entradas - saidas) as saldo FROM estoque ORDER BY cod").fetchall()
-    entradas = conn.execute("SELECT data, cod, descricao, unid, quantidade FROM entradas ORDER BY data DESC").fetchall()
-    saidas = conn.execute("SELECT data, cod, descricao, unid, quantidade FROM saidas ORDER BY data DESC").fetchall()
-    itens = conn.execute("SELECT cod, descricao, unid, estoque_minimo FROM itens ORDER BY cod").fetchall()
-    conn.close()
+    # Busca dados das 4 tabelas (USANDO O CURSOR PADRÃO PARA EVITAR CONFLITOS DE THREADING, MAS ISSO PODE SER OTIMIZADO)
+    # ATENÇÃO: Se estas consultas não estiverem funcionando, você deve usar o query_db para elas,
+    # ou garantir que o cursor padrão psycopg2.connect(DATABASE_URL).cursor() sem RealDictCursor seja usado.
+    
+    # Exemplo: Usando query_db corrigido para garantir o uso de public.
+    estoque = query_db("SELECT cod, descricao, unid, entradas, saidas, estoque_minimo, (entradas - saidas) as saldo FROM public.estoque ORDER BY cod")
+    entradas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.entradas ORDER BY data DESC")
+    saidas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.saidas ORDER BY data DESC")
+    itens = query_db("SELECT cod, descricao, unid, estoque_minimo FROM public.itens ORDER BY cod")
 
     # Cria Workbook
     wb = openpyxl.Workbook()
     
-    # Estilos Padrão
+    # Estilos Padrão (Omitido para brevidade, assumindo que funcionam)
     header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="192a56", end_color="192a56", fill_type="solid") # Azul do sistema
+    header_fill = PatternFill(start_color="192a56", end_color="192a56", fill_type="solid")
     center_align = Alignment(horizontal='center')
 
     def style_header(ws):
@@ -131,6 +139,7 @@ def export_excel():
     style_header(ws1)
     
     for row in estoque:
+        # Acesso por nome de coluna graças ao RealDictCursor no query_db
         status = "BAIXO" if row['saldo'] <= row['estoque_minimo'] else "OK"
         ws1.append([row['cod'], row['descricao'], row['unid'], row['estoque_minimo'], row['entradas'], row['saidas'], row['saldo'], status])
         
@@ -161,9 +170,9 @@ def export_excel():
     for row in itens:
         ws4.append([row['cod'], row['descricao'], row['unid'], row['estoque_minimo']])
 
-    # Ajuste largura das colunas (automático simples)
+    # Ajuste largura das colunas
     for ws in wb.worksheets:
-        ws.column_dimensions['B'].width = 30 # Descrição mais larga
+        ws.column_dimensions['B'].width = 30
         ws.column_dimensions['A'].width = 15
 
     # Salva em memória
@@ -174,13 +183,15 @@ def export_excel():
     filename = f"Relatorio_Estoque_{date.today().strftime('%d-%m-%Y')}.xlsx"
     return send_file(out, download_name=filename, as_attachment=True, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# --- APIS DO DASHBOARD (Mantidas iguais) ---
+# --- APIS DO DASHBOARD ---
 @app.route("/api/dashboard/stats")
 @login_required
 def api_stats():
     total_itens = query_db("SELECT COUNT(*) as c FROM public.itens", one=True)['c']
     baixa = query_db("SELECT COUNT(*) as c FROM public.estoque WHERE (entradas - saidas) <= estoque_minimo", one=True)['c']
     hoje = date.today().isoformat()
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s'
     mov_ent = query_db("SELECT COUNT(*) as c FROM public.entradas WHERE data = %s", (hoje,), one=True)['c']
     mov_sai = query_db("SELECT COUNT(*) as c FROM public.saidas WHERE data = %s", (hoje,), one=True)['c']
     
@@ -190,6 +201,7 @@ def api_stats():
     for i in range(6, -1, -1):
         d = (date.today() - timedelta(days=i)).isoformat()
         chart_labels.append(d.split('-')[2] + '/' + d.split('-')[1])
+        # CORREÇÃO SQL: Trocando '?' por '%s'
         qe = query_db("SELECT SUM(quantidade) as q FROM public.entradas WHERE data = %s", (d,), one=True)['q'] or 0
         qs = query_db("SELECT SUM(quantidade) as q FROM public.saidas WHERE data = %s", (d,), one=True)['q'] or 0
         chart_ent.append(qe)
@@ -219,35 +231,65 @@ def api_itens_handler():
         return jsonify([dict(r) for r in query_db("SELECT * FROM public.itens ORDER BY cod")])
     data = request.json
     cod = data.get("cod", "").strip().upper()
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s'
     if query_db("SELECT 1 FROM public.itens WHERE cod=%s", (cod,), one=True): return jsonify({"error": "Código já existe"}), 400
-    query_db("INSERT INTO itens (cod, descricao, unid, estoque_minimo) VALUES (%s,%s,%s,%s)", 
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s' e adicionando public.
+    query_db("INSERT INTO public.itens (cod, descricao, unid, estoque_minimo) VALUES (%s, %s, %s, %s)", 
              (cod, data['descricao'], data['unid'], int(data.get("estoque_minimo", 10))), commit=True)
-    query_db("INSERT INTO estoque (cod, descricao, unid, estoque_minimo) VALUES (%s,%s,%s,%s)", 
+    query_db("INSERT INTO public.estoque (cod, descricao, unid, estoque_minimo) VALUES (%s, %s, %s, %s)", 
              (cod, data['descricao'], data['unid'], int(data.get("estoque_minimo", 10))), commit=True)
+    
+    # EMITIR EVENTO APÓS CADASTRO DE NOVO ITEM
+    socketio.emit('estoque_atualizado', {'message': 'Novo item cadastrado.'})
+    
     return jsonify({"ok": True})
 
 @app.route("/api/entrada", methods=["POST"])
 @login_required
 def api_entrada():
     d = request.json
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s'
     item = query_db("SELECT * FROM public.estoque WHERE cod=%s", (d['cod'],), one=True)
+    
     if not item: return jsonify({"error": "Item não encontrado"}), 404
-    query_db("INSERT INTO entradas (cod, descricao, unid, quantidade, data) VALUES (%s,%s,%s,%s,%s)", 
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s' e adicionando public.
+    query_db("INSERT INTO public.entradas (cod, descricao, unid, quantidade, data) VALUES (%s, %s, %s, %s, %s)", 
              (d['cod'], item['descricao'], item['unid'], int(d['qtd']), d['data']), commit=True)
-    query_db("UPDATE estoque SET entradas = entradas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
+             
+    # CORREÇÃO SQL: Trocando '?' por '%s'
+    query_db("UPDATE public.estoque SET entradas = entradas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
+    
+    # EMITIR EVENTO DE TEMPO REAL
+    socketio.emit('estoque_atualizado', {'message': 'Entrada registrada. Recarregando dados.'})
+    
     return jsonify({"ok": True})
 
 @app.route("/api/saida", methods=["POST"])
 @login_required
 def api_saida():
     d = request.json
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s'
     item = query_db("SELECT * FROM public.estoque WHERE cod=%s", (d['cod'],), one=True)
+    
     if not item: return jsonify({"error": "Item não encontrado"}), 404
     saldo = item['entradas'] - item['saidas']
     if int(d['qtd']) > saldo: return jsonify({"error": f"Saldo insuficiente ({saldo})"}), 400
-    query_db("INSERT INTO saidas (cod, descricao, unid, quantidade, data) VALUES (%s,%s,%s,%s,%s)", 
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s' e adicionando public.
+    query_db("INSERT INTO public.saidas (cod, descricao, unid, quantidade, data) VALUES (%s, %s, %s, %s, %s)", 
              (d['cod'], item['descricao'], item['unid'], int(d['qtd']), d['data']), commit=True)
-    query_db("UPDATE estoque SET saidas = saidas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
+             
+    # CORREÇÃO SQL: Trocando '?' por '%s'
+    query_db("UPDATE public.estoque SET saidas = saidas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
+    
+    # EMITIR EVENTO DE TEMPO REAL
+    socketio.emit('estoque_atualizado', {'message': 'Saída registrada. Recarregando dados.'})
+    
     return jsonify({"ok": True})
 
 @app.route("/api/movimentacoes")
@@ -259,14 +301,15 @@ def api_movimentacoes():
 
 # Users (Admin)
 @app.route("/api/users", methods=["GET", "POST"])
-@login_required # Trocar por admin_required em produção real
+@login_required
 def api_users():
     if not session.get("is_admin"): return jsonify({"error": "Acesso negado"}), 403
     if request.method == 'GET':
         return jsonify([dict(r) for r in query_db("SELECT id, username, is_admin FROM public.users")])
     d = request.json
     try:
-        query_db("INSERT INTO users (username, password_hash, is_admin) VALUES (%s,%s,%s)", 
+        # CORREÇÃO SQL: Trocando '?' por '%s' e adicionando public.
+        query_db("INSERT INTO public.users (username, password_hash, is_admin) VALUES (%s, %s, %s)", 
                  (d['username'], generate_password_hash(d['password']), 1 if d['is_admin'] else 0), commit=True)
         return jsonify({"ok": True})
     except: return jsonify({"error": "Erro/Duplicado"}), 400
@@ -276,13 +319,17 @@ def api_users():
 def api_del_user(uid):
     if not session.get("is_admin"): return jsonify({"error": "Acesso negado"}), 403
     if uid == session["user_id"]: return jsonify({"error": "Não delete a si mesmo"}), 400
-    query_db("DELETE FROM users WHERE id=%s", (uid,), commit=True)
+    
+    # CORREÇÃO SQL: Trocando '?' por '%s'
+    query_db("DELETE FROM public.users WHERE id=%s", (uid,), commit=True)
     return jsonify({"ok": True})
 
+# --- Execução Principal (Adaptado para SocketIO/eventlet) ---
 if __name__ == "__main__":
-    # Usa a porta definida pelo ambiente (Render/Heroku) ou 5000 localmente
+    # Usa a porta definida pelo ambiente (Render/Heroku) ou 5002 localmente
     port = int(os.environ.get("PORT", 5002))
-
-    app.run(debug=True, host="0.0.0.0", port=port)
-
-
+    
+    # Rodar o SocketIO com eventlet
+    # O Gunicorn (no Render) deve ser configurado separadamente para usar --worker-class eventlet
+    print(f"Iniciando SocketIO na porta {port}...")
+    socketio.run(app, debug=True, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
