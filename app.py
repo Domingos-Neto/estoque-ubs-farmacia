@@ -245,7 +245,7 @@ def api_saida():
     if not item: return jsonify({"error": "Item não encontrado"}), 404
     saldo = item['entradas'] - item['saidas']
     if int(d['qtd']) > saldo: return jsonify({"error": f"Saldo insuficiente ({saldo})"}), 400
-    query_db("INSERT INTO saidas (cod, descricao, unid, quantidade, data) VALUES (%s,?,%s,%s,%s)", 
+    query_db("INSERT INTO saidas (cod, descricao, unid, quantidade, data) VALUES (%s,%s,%s,%s,%s)", 
              (d['cod'], item['descricao'], item['unid'], int(d['qtd']), d['data']), commit=True)
     query_db("UPDATE estoque SET saidas = saidas + %s WHERE cod=%s", (int(d['qtd']), d['cod']), commit=True)
     return jsonify({"ok": True})
@@ -284,4 +284,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5002))
 
     app.run(debug=True, host="0.0.0.0", port=port)
+
 
