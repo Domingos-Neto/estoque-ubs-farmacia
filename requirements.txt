@@ -4,3 +4,6 @@ openpyxl
 gunicorn
 psycopg2-binary  # Novo: Driver para PostgreSQL
 python-dotenv    # Opcional, mas útil para carregar variáveis localmente
+Flask-SocketIO
+eventlet
+
