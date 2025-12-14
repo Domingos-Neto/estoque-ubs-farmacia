@@ -17,9 +17,18 @@ from openpyxl.styles import Font, PatternFill, Alignment
 app = Flask(__name__)
 app.secret_key = "chave_secreta_super_segura_troque_em_producao"
 
+# ----------------------------------------------------------------------
+# INICIALIZAÇÃO DO SOCKETIO CORRIGIDA
+# ----------------------------------------------------------------------
 # Configurar o SocketIO
-# A chave secreta do Flask ja serve para o SocketIO, mas mantive a linha para clareza
-socketio = SocketIO(app)
+socketio = SocketIO(
+    app,
+    async_mode='eventlet', # Confirma que o worker assíncrono é o eventlet
+    # Prioriza o 'polling' (mais estável no Gunicorn/Render) antes de tentar 'websocket'
+    transports=['polling', 'websocket'] 
+)
+# ----------------------------------------------------------------------
+
 
 def get_db():
     """Conecta ao banco de dados PostgreSQL e armazena em g."""
@@ -108,11 +117,7 @@ def dashboard():
 def export_excel():
     conn = get_db()
     
-    # Busca dados das 4 tabelas (USANDO O CURSOR PADRÃO PARA EVITAR CONFLITOS DE THREADING, MAS ISSO PODE SER OTIMIZADO)
-    # ATENÇÃO: Se estas consultas não estiverem funcionando, você deve usar o query_db para elas,
-    # ou garantir que o cursor padrão psycopg2.connect(DATABASE_URL).cursor() sem RealDictCursor seja usado.
-    
-    # Exemplo: Usando query_db corrigido para garantir o uso de public.
+    # Busca dados das 4 tabelas 
     estoque = query_db("SELECT cod, descricao, unid, entradas, saidas, estoque_minimo, (entradas - saidas) as saldo FROM public.estoque ORDER BY cod")
     entradas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.entradas ORDER BY data DESC")
     saidas = query_db("SELECT data, cod, descricao, unid, quantidade FROM public.saidas ORDER BY data DESC")
